@@ -59,17 +59,11 @@ Games terminate immediately upon:
 # Install Apalache
 # Download from: https://github.com/informalsystems/apalache
 
-# Minimal smoke test (init only)
-apalache-mc check --config=Connect4Apalache.apalache.cfg --length=0 --inv=TypeOK Connect4Apalache.tla
+# Run bounded model checking
+apalache-mc check --length=15 Connect4Apalache.tla
 
-# Explore a few moves with core invariants
-apalache-mc check --config=Connect4Apalache.apalache.cfg --length=4 --inv=TypeOK,ValidGameState Connect4Apalache.tla
-
-# Include symmetry and physics invariants (heavier)
-apalache-mc check --config=Connect4Apalache.apalache.cfg --length=6 --inv=TypeOK,ValidGameState,StateSpaceReduction,NoImpossiblePositions Connect4Apalache.tla
-
-# If Apalache needs more JVM heap (example: 8 GiB)
-APALACHE_JAVA_OPTS="-Xmx8G" apalache-mc check --config=Connect4Apalache.apalache.cfg --length=6 --inv=TypeOK,ValidGameState Connect4Apalache.tla
+# Generate counterexamples
+apalache-mc check --length=20 --inv=TypeOK Connect4Apalache.tla
 ```
 
 ### With TLC
@@ -195,7 +189,3 @@ When modifying specifications:
 - [Apalache Documentation](https://apalache.informal.systems/)
 - [TLA+ Language Manual](https://lamport.azurewebsites.net/tla/book.html)
 - [Connect 4 Complexity Analysis](https://tromp.github.io/c4/c4.html)
-
-```
-apalache-mc check --config=Connect4Apalache.apalache.cfg --length=0 --inv=TypeOK Connect4Apalache.tla
-```

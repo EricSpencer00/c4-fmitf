@@ -21,18 +21,18 @@ case $TOOL in
             echo "   https://github.com/informalsystems/apalache/releases"
             exit 1
         fi
-
+        
         # Run bounded model checking
         echo "🔍 Running bounded model checking (length=12)..."
-        apalache-mc check --config=${SPEC}.apalache.cfg --length=12 --inv=TypeOK,ValidGameState ${SPEC}.tla
+        apalache-mc check --length=12 --inv=TypeOK,ValidGameState ${SPEC}.tla
         
         # Check state space reduction
         echo "🔍 Verifying state space reduction..."
-        apalache-mc check --config=${SPEC}.apalache.cfg --length=8 --inv=StateSpaceReduction ${SPEC}.tla
+        apalache-mc check --length=8 --inv=StateSpaceReduction ${SPEC}.tla
         
         # Look for counterexamples
         echo "🔍 Searching for property violations..."
-        apalache-mc check --config=${SPEC}.apalache.cfg --length=15 --inv=NoImpossiblePositions ${SPEC}.tla
+        apalache-mc check --length=15 --inv=NoImpossiblePositions ${SPEC}.tla
         ;;
         
     "tlc")
