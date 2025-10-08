@@ -15,17 +15,19 @@ EXTENDS Integers, Sequences, FiniteSets, Apalache
 CONSTANTS
     \* @type: Int;
     ROWS,
-    \* @type: Int; 
+    \* @type: Int;
     COLS,
     \* @type: Set(Int);
     PLAYERS
+
+\* (BoardOf and BoardShape are defined above.)
 
 VARIABLES
     \* @type: Seq(Seq(Int));
     board,
     \* @type: Int;
     turn,
-    \* @type: Bool;
+    \* @type: BOOLEAN;
     gameOver,
     \* @type: Int;
     winner,
@@ -42,9 +44,14 @@ PLAYER2 == 2
 
 \* Board canonicalization for symmetry reduction
 
+\* Well-formed boards as functions from row->col to values
+BoardOf == [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+\* Alias used consistently throughout the spec
+BoardShape == BoardOf
+
 FlipHorizontal(b) ==
-    [row \in 1..Len(b) |-> 
-        [col \in 1..Len(b[row]) |-> b[row][Len(b[row]) + 1 - col]]]
+    [row \in 1..ROWS |-> 
+        [col \in 1..COLS |-> b[row][COLS + 1 - col]]]
 
 FlipPlayer(p) == 
     CASE p = PLAYER1 -> PLAYER2
@@ -52,13 +59,13 @@ FlipPlayer(p) ==
       [] OTHER -> EMPTY
 
 SwapColors(b) ==
-    [row \in 1..Len(b) |-> 
-        [col \in 1..Len(b[row]) |-> FlipPlayer(b[row][col])]]
+    [row \in 1..ROWS |-> 
+        [col \in 1..COLS |-> FlipPlayer(b[row][col])]]
 
 \* Lexicographic comparison used by canonicalization
 LexLess(b1, b2) ==
-    /\ b1 \in [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
-    /\ b2 \in [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+    /\ b1 \in BoardShape
+    /\ b2 \in BoardShape
     /\ \E row \in 1..ROWS :
         /\ \A r \in 1..(row-1) : b1[r] = b2[r]
         /\ \E col \in 1..COLS :
@@ -80,15 +87,15 @@ CanonicalForm(b) ==
 
 DropRow(b, col) ==
     \* Find lowest empty row in column, 0 if full
-    IF \A row \in 1..Len(b) : b[row][col] # EMPTY
+    IF \A row \in 1..ROWS : b[row][col] # EMPTY
     THEN 0
-    ELSE CHOOSE row \in 1..Len(b) : 
+    ELSE CHOOSE row \in 1..ROWS : 
             /\ b[row][col] = EMPTY
-            /\ \A r \in 1..Len(b) : r < row => b[r][col] # EMPTY
+            /\ \A r \in 1..ROWS : r < row => b[r][col] # EMPTY
 
 DropPiece(b, row, col, player) ==
-    [r \in 1..Len(b) |-> 
-        [c \in 1..Len(b[r]) |-> 
+    [r \in 1..ROWS |-> 
+        [c \in 1..COLS |-> 
             IF r = row /\ c = col THEN player ELSE b[r][c]]]
 
 ValidColumns(b) ==
@@ -96,7 +103,6 @@ ValidColumns(b) ==
 
 \* Win detection optimized for early termination
 
-\* @type: (Seq(Seq(Int)), Int, Int, Int, Int, Int) => Bool;
 FourInDirection(b, start_row, start_col, delta_row, delta_col, player) ==
     /\ \A i \in 0..3 : 
         LET row == start_row + i * delta_row
@@ -105,7 +111,6 @@ FourInDirection(b, start_row, start_col, delta_row, delta_col, player) ==
            /\ col \in 1..COLS
            /\ b[row][col] = player
 
-\* @type: (Seq(Seq(Int)), Int) => Bool;           
 PlayerWins(b, player) ==
     \E row \in 1..ROWS, col \in 1..COLS :
         b[row][col] = player /\
@@ -118,11 +123,9 @@ PlayerWins(b, player) ==
         \/ (row >= 4 /\ col >= 4 /\ FourInDirection(b, row-3, col-3, 1, 1, player)) \* ↖ check
         \/ (row >= 4 /\ col <= COLS-3 /\ FourInDirection(b, row-3, col+3, 1, -1, player)) \* ↗ check
 
-\* @type: (Seq(Seq(Int))) => Bool;        
 BoardFull(b) ==
     \A row \in 1..ROWS, col \in 1..COLS : b[row][col] # EMPTY
 
-\* @type: (Seq(Seq(Int))) => Int;    
 GameWinner(b) ==
     IF PlayerWins(b, PLAYER1) THEN PLAYER1
     ELSE IF PlayerWins(b, PLAYER2) THEN PLAYER2  
@@ -130,9 +133,7 @@ GameWinner(b) ==
 
 \* State space initialization
     
-\* @type: () => Seq(Seq(Int));
-EmptyBoard == 
-    [row \in 1..ROWS |-> [col \in 1..COLS |-> EMPTY]]
+EmptyBoard == [r \in 1..ROWS |-> [c \in 1..COLS |-> EMPTY]]
 
 Init ==
     /\ board = EmptyBoard
@@ -173,7 +174,7 @@ SpecWithFairness == Spec /\ Fairness
 
 \* Type safety
 TypeOK ==
-    /\ board \in [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+    /\ board \in BoardShape
     /\ turn \in {PLAYER1, PLAYER2}
     /\ gameOver \in BOOLEAN
     /\ winner \in {EMPTY, PLAYER1, PLAYER2} 
@@ -193,7 +194,7 @@ ValidGameState ==
 ValidSequence(moves) ==
     LET n == Len(moves)
     IN /\ moves \in Seq(1..COLS)
-       /\ \E boards \in Seq([1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]) :
+    /\ \E boards \in Seq(BoardShape) :
             /\ Len(boards) = n + 1
             /\ boards[1] = EmptyBoard
             /\ boards[n + 1] = board

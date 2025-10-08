@@ -23,8 +23,17 @@ case $TOOL in
         fi
         
         # Run bounded model checking
-        echo "🔍 Running bounded model checking (length=12)..."
-        apalache-mc check --length=12 --inv=TypeOK,ValidGameState ${SPEC}.tla
+        # If SKIP_SNOWCAT is set, run a best-effort transpile to skip the full
+        # Apalache pipeline (this bypasses Snowcat/type checking). This is
+        # useful for quick iteration, but note: it does NOT perform invariant
+        # checking or bounded model checking. Use with caution.
+        if [ "${SKIP_SNOWCAT}" = "1" ] || [ "${TOOL}" = "apalache-notype" ]; then
+            echo "⚠️  SKIP_SNOWCAT set: parsing spec only (Snowcat/typecheck skipped)"
+            apalache-mc parse ${SPEC}.tla
+        else
+            echo "🔍 Running bounded model checking (length=12)..."
+            apalache-mc check --length=12 --inv=TypeOK,ValidGameState ${SPEC}.tla
+        fi
         
         # Check state space reduction
         echo "🔍 Verifying state space reduction..."
@@ -32,7 +41,22 @@ case $TOOL in
         
         # Look for counterexamples
         echo "🔍 Searching for property violations..."
-        apalache-mc check --length=15 --inv=NoImpossiblePositions ${SPEC}.tla
+        if [ "${SKIP_SNOWCAT}" = "1" ] || [ "${TOOL}" = "apalache-notype" ]; then
+            echo "⚠️  Skipped: NoImpossiblePositions (requires full check with Snowcat)"
+        else
+            apalache-mc check --length=15 --inv=NoImpossiblePositions ${SPEC}.tla
+        fi
+        ;;
+
+    "apalache-notype")
+        echo "🚀 Running Apalache (transpile only, Snowcat skipped)"
+        if ! command -v apalache-mc &> /dev/null; then
+            echo "❌ Apalache not found. Please install from:"
+            echo "   https://github.com/informalsystems/apalache/releases"
+            exit 1
+        fi
+    echo "⚠️  Parsing ${SPEC}.tla (no type checking / no invariants)"
+    apalache-mc parse ${SPEC}.tla
         ;;
         
     "tlc")
