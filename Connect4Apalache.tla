@@ -33,9 +33,7 @@ VARIABLES
     moveCount
 
 \* Apalache type aliases
-\* @typeAlias: BOARD = Seq(Seq(Int));
-\* @typeAlias: POSITION = <<Int, Int>>;
-BoardType == TRUE
+\* (removed explicit type alias to avoid Snowcat deprecated syntax; let Apalache infer)
 
 \* Constants for players
 EMPTY == 0
@@ -44,23 +42,29 @@ PLAYER2 == 2
 
 \* Board canonicalization for symmetry reduction
 
-\* @type: (Seq(Seq(Int))) => Seq(Seq(Int));
 FlipHorizontal(b) ==
-    [row \in DOMAIN b |-> 
-        [col \in DOMAIN b[row] |-> b[row][Len(b[row]) + 1 - col]]]
+    [row \in 1..Len(b) |-> 
+        [col \in 1..Len(b[row]) |-> b[row][Len(b[row]) + 1 - col]]]
 
-\* @type: (Int) => Int;        
 FlipPlayer(p) == 
     CASE p = PLAYER1 -> PLAYER2
       [] p = PLAYER2 -> PLAYER1  
       [] OTHER -> EMPTY
 
-\* @type: (Seq(Seq(Int))) => Seq(Seq(Int));
 SwapColors(b) ==
-    [row \in DOMAIN b |-> 
-        [col \in DOMAIN b[row] |-> FlipPlayer(b[row][col])]]
+    [row \in 1..Len(b) |-> 
+        [col \in 1..Len(b[row]) |-> FlipPlayer(b[row][col])]]
 
-\* @type: (Seq(Seq(Int))) => Seq(Seq(Int));        
+\* Lexicographic comparison used by canonicalization
+LexLess(b1, b2) ==
+    /\ b1 \in [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+    /\ b2 \in [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+    /\ \E row \in 1..ROWS :
+        /\ \A r \in 1..(row-1) : b1[r] = b2[r]
+        /\ \E col \in 1..COLS :
+            /\ \A c \in 1..(col-1) : b1[row][c] = b2[row][c]
+            /\ b1[row][col] < b2[row][col]
+
 CanonicalForm(b) == 
     \* Choose lexicographically smallest among all symmetries
     LET h_flip == FlipHorizontal(b)
@@ -70,34 +74,23 @@ CanonicalForm(b) ==
     IN CHOOSE canonical \in all_forms :
         \A other \in all_forms : 
             \/ canonical = other
-            \/ LexSmaller(canonical, other)
-
-\* @type: (Seq(Seq(Int)), Seq(Seq(Int))) => Bool;            
-LexSmaller(b1, b2) ==
-    \E row \in DOMAIN b1 :
-        /\ \A r \in DOMAIN b1 : r < row => b1[r] = b2[r]
-        /\ \E col \in DOMAIN b1[row] :
-            /\ \A c \in DOMAIN b1[row] : c < col => b1[row][c] = b2[row][c]  
-            /\ b1[row][col] < b2[row][col]
+            \/ LexLess(canonical, other)
 
 \* Efficient move validation and execution
 
-\* @type: (Seq(Seq(Int)), Int) => Int;
 DropRow(b, col) ==
     \* Find lowest empty row in column, 0 if full
-    IF \A row \in DOMAIN b : b[row][col] # EMPTY
+    IF \A row \in 1..Len(b) : b[row][col] # EMPTY
     THEN 0
-    ELSE CHOOSE row \in DOMAIN b : 
+    ELSE CHOOSE row \in 1..Len(b) : 
             /\ b[row][col] = EMPTY
-            /\ \A r \in DOMAIN b : r < row => b[r][col] # EMPTY
+            /\ \A r \in 1..Len(b) : r < row => b[r][col] # EMPTY
 
-\* @type: (Seq(Seq(Int)), Int, Int, Int) => Seq(Seq(Int));            
 DropPiece(b, row, col, player) ==
-    [r \in DOMAIN b |-> 
-        [c \in DOMAIN b[r] |-> 
+    [r \in 1..Len(b) |-> 
+        [c \in 1..Len(b[r]) |-> 
             IF r = row /\ c = col THEN player ELSE b[r][c]]]
 
-\* @type: (Seq(Seq(Int))) => Set(Int);            
 ValidColumns(b) ==
     {col \in 1..COLS : DropRow(b, col) > 0}
 
@@ -196,23 +189,28 @@ ValidGameState ==
     /\ (winner = PLAYER1) => PlayerWins(board, PLAYER1)
     /\ (winner = PLAYER2) => PlayerWins(board, PLAYER2)
 
+
+ValidSequence(moves) ==
+    LET n == Len(moves)
+    IN /\ moves \in Seq(1..COLS)
+       /\ \E boards \in Seq([1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]) :
+            /\ Len(boards) = n + 1
+            /\ boards[1] = EmptyBoard
+            /\ boards[n + 1] = board
+            /\ \A i \in 1..n :
+                    LET cur == boards[i]
+                        nxt == boards[i+1]
+                        col == moves[i]
+                        player == IF i % 2 = 1 THEN PLAYER1 ELSE PLAYER2
+                        row == DropRow(cur, col)
+                    IN /\ row > 0
+                       /\ nxt = CanonicalForm(DropPiece(cur, row, col, player))
+
 \* Reachability - every position reachable through valid play
 Reachable == 
     moveCount >= 0 => \E seq \in Seq(1..COLS) :
         /\ Len(seq) = moveCount  
         /\ ValidSequence(seq)
-
-\* @type: (Seq(Int)) => Bool;        
-ValidSequence(moves) ==
-    LET play[i \in 0..Len(moves)] ==
-        IF i = 0 THEN EmptyBoard
-        ELSE LET col == moves[i]
-                 row == DropRow(play[i-1], col)
-                 player == IF i % 2 = 1 THEN PLAYER1 ELSE PLAYER2
-             IN IF row > 0 THEN DropPiece(play[i-1], row, col, player)
-                ELSE play[i-1]  \* Invalid move, no change
-    IN /\ \A i \in 1..Len(moves) : DropRow(play[i-1], moves[i]) > 0
-       /\ CanonicalForm(play[Len(moves)]) = board
 
 \* Efficiency property - canonical forms reduce state space
 StateSpaceReduction ==
