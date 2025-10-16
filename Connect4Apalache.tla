@@ -17,8 +17,15 @@ CONSTANTS
     ROWS,
     \* @type: Int;
     COLS,
+    \* Explicit sets for Apalache expansion
+    ROWS_SET,
+    COLS_SET,
     \* @type: Set(Int);
     PLAYERS
+
+\* Row/Column index sets (must be provided as explicit sets in the TLC config)
+RowRange == ROWS_SET
+ColRange == COLS_SET
 
 VARIABLES
     \* @type: Int -> (Int -> Int);
@@ -41,12 +48,12 @@ PLAYER2 == 2
 
 \* Well-formed boards as functions from row->col to values
 \* @type: () => Set(Int -> (Int -> Int));
-BoardOf == [1..ROWS -> [1..COLS -> {EMPTY, PLAYER1, PLAYER2}]]
+BoardOf == [RowRange -> [ColRange -> {EMPTY, PLAYER1, PLAYER2}]]
 
 \* @type: (Int -> (Int -> Int)) => (Int -> (Int -> Int));
 FlipHorizontal(b) ==
-    [row \in 1..ROWS |-> 
-        [col \in 1..COLS |-> b[row][COLS + 1 - col]]]
+    [row \in RowRange |-> 
+        [col \in ColRange |-> b[row][COLS + 1 - col]]]
 
 \* @type: (Int) => Int;
 FlipPlayer(p) == 
@@ -56,18 +63,18 @@ FlipPlayer(p) ==
 
 \* @type: (Int -> (Int -> Int)) => (Int -> (Int -> Int));
 SwapColors(b) ==
-    [row \in 1..ROWS |-> 
-        [col \in 1..COLS |-> FlipPlayer(b[row][col])]]
+    [row \in RowRange |-> 
+        [col \in ColRange |-> FlipPlayer(b[row][col])]]
 
 \* Lexicographic comparison used by canonicalization
 \* @type: (Int -> (Int -> Int), Int -> (Int -> Int)) => Bool;
 LexLess(b1, b2) ==
     /\ b1 \in BoardOf
     /\ b2 \in BoardOf
-    /\ \E row \in 1..ROWS :
-        /\ \A r \in 1..(row-1) : b1[r] = b2[r]
-        /\ \E col \in 1..COLS :
-            /\ \A c \in 1..(col-1) : b1[row][c] = b2[row][c]
+    /\ \E row \in RowRange :
+        /\ \A r \in RowRange : r < row => b1[r] = b2[r]
+        /\ \E col \in ColRange :
+            /\ \A c \in ColRange : c < col => b1[row][c] = b2[row][c]
             /\ b1[row][col] < b2[row][col]
 
 \* @type: (Int -> (Int -> Int)) => (Int -> (Int -> Int));
@@ -87,21 +94,21 @@ CanonicalForm(b) ==
 \* @type: (Int -> (Int -> Int), Int) => Int;
 DropRow(b, col) ==
     \* Find lowest empty row in column, 0 if full
-    IF \A row \in 1..ROWS : b[row][col] # EMPTY
+    IF \A row \in RowRange : b[row][col] # EMPTY
     THEN 0
-    ELSE CHOOSE row \in 1..ROWS : 
-            /\ b[row][col] = EMPTY
-            /\ \A r \in 1..ROWS : r < row => b[r][col] # EMPTY
+    ELSE CHOOSE row \in RowRange : 
+        /\ b[row][col] = EMPTY
+        /\ \A r \in RowRange : r < row => b[r][col] # EMPTY
 
 \* @type: (Int -> (Int -> Int), Int, Int, Int) => (Int -> (Int -> Int));
 DropPiece(b, row, col, player) ==
-    [r \in 1..ROWS |-> 
-        [c \in 1..COLS |-> 
+    [r \in RowRange |-> 
+        [c \in ColRange |-> 
             IF r = row /\ c = col THEN player ELSE b[r][c]]]
 
 \* @type: (Int -> (Int -> Int)) => Set(Int);
 ValidColumns(b) ==
-    {col \in 1..COLS : DropRow(b, col) > 0}
+    {col \in ColRange : DropRow(b, col) > 0}
 
 \* Win detection optimized for early termination
 
@@ -110,13 +117,13 @@ FourInDirection(b, start_row, start_col, delta_row, delta_col, player) ==
     /\ \A i \in 0..3 : 
         LET row == start_row + i * delta_row
             col == start_col + i * delta_col  
-        IN /\ row \in 1..ROWS
-           /\ col \in 1..COLS
+          IN /\ row \in RowRange
+              /\ col \in ColRange
            /\ b[row][col] = player
 
 \* @type: (Int -> (Int -> Int), Int) => Bool;
 PlayerWins(b, player) ==
-    \E row \in 1..ROWS, col \in 1..COLS :
+    \E row \in RowRange, col \in ColRange :
         b[row][col] = player /\
         \/ FourInDirection(b, row, col, 0, 1, player)   \* Horizontal →
         \/ FourInDirection(b, row, col, 1, 0, player)   \* Vertical ↓ 
@@ -129,7 +136,7 @@ PlayerWins(b, player) ==
 
 \* @type: (Int -> (Int -> Int)) => Bool;
 BoardFull(b) ==
-    \A row \in 1..ROWS, col \in 1..COLS : b[row][col] # EMPTY
+    \A row \in RowRange, col \in ColRange : b[row][col] # EMPTY
 
 \* @type: (Int -> (Int -> Int)) => Int;
 GameWinner(b) ==
@@ -140,7 +147,7 @@ GameWinner(b) ==
 \* State space initialization
     
 \* @type: () => (Int -> (Int -> Int));
-EmptyBoard == [r \in 1..ROWS |-> [c \in 1..COLS |-> EMPTY]]
+EmptyBoard == [r \in RowRange |-> [c \in ColRange |-> EMPTY]]
 
 Init ==
     /\ board = EmptyBoard
@@ -200,7 +207,7 @@ ValidGameState ==
 \* @type: (Seq(Int)) => Bool;
 ValidSequence(moves) ==
     LET n == Len(moves)
-    IN /\ moves \in Seq(1..COLS)
+    IN /\ moves \in Seq(ColRange)
     /\ \E boards \in Seq(BoardOf) :
             /\ Len(boards) = n + 1
             /\ boards[1] = EmptyBoard
@@ -216,7 +223,7 @@ ValidSequence(moves) ==
 
 \* Reachability - every position reachable through valid play
 Reachable == 
-    moveCount >= 0 => \E seq \in Seq(1..COLS) :
+    moveCount >= 0 => \E seq \in Seq(ColRange) :
         /\ Len(seq) = moveCount  
         /\ ValidSequence(seq)
 
@@ -228,7 +235,7 @@ StateSpaceReduction ==
 \* No impossible positions  
 NoImpossiblePositions ==
     \* Can't have floating pieces (pieces must be supported)
-    \A row \in 2..ROWS, col \in 1..COLS :
+    \A row \in {r \in RowRange : r > 1}, col \in ColRange :
         board[row][col] # EMPTY => board[row-1][col] # EMPTY
 
 =============================================================================
