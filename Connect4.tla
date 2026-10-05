@@ -1,20 +1,21 @@
 --------------------------- MODULE Connect4 ---------------------------
 (*
-  Connect 4 specification with state space optimization.
-  
-  Key optimizations:
-  1. Board normalization (horizontal flip + color swap) reduces space by ~75%
-  2. Only reachable states through valid gameplay
-  3. Efficient representation using sequences
-  4. Pruning of symmetric duplicates
+  Connect 4 specification with a history of normalized boards.
+  The live board and turn retain their original player identities.
 *)
 
-EXTENDS Integers, Sequences, FiniteSets, Apalache
+EXTENDS Integers, Sequences, FiniteSets
 
 CONSTANTS
     ROWS,    \* Number of rows (typically 6)
     COLS,    \* Number of columns (typically 7)
-    PLAYERS  \* Set of players {1, 2} where 1 = Red, 2 = Yellow
+    PLAYERS, \* Set of players {1, 2} where 1 = Red, 2 = Yellow
+    MAX_MOVES \* TLC exploration bound; selected by the configuration
+
+ASSUME /\ ROWS \in Nat \ {0}
+       /\ COLS \in Nat \ {0}
+       /\ PLAYERS = {1, 2}
+       /\ MAX_MOVES \in Nat
 
 VARIABLES
     board,      \* Current board state: [row][col] -> player or 0 (empty)
@@ -55,6 +56,14 @@ SwapBoardColors(b) ==
     [row \in 1..ROWS |-> 
         [col \in 1..COLS |-> SwapPlayer(b[row][col])]]
 
+\* Compare cells in row-major order; integer <= cannot compare boards.
+BoardLessOrEqual(a, b) ==
+    a = b \/
+    \E row \in 1..ROWS, col \in 1..COLS :
+        /\ a[row][col] < b[row][col]
+        /\ \A r \in 1..ROWS, c \in 1..COLS :
+            (r < row \/ (r = row /\ c < col)) => a[r][c] = b[r][c]
+
 \* @type: (Seq(Seq(Int))) => Seq(Seq(Int));
 NormalizeBoard(b) ==
     LET flipped == FlipBoardHorizontally(b)
@@ -62,7 +71,7 @@ NormalizeBoard(b) ==
         flippedAndSwapped == SwapBoardColors(flipped)
         candidates == {b, flipped, colorSwapped, flippedAndSwapped}
     IN CHOOSE normalized \in candidates : 
-        \A other \in candidates : normalized <= other
+        \A other \in candidates : BoardLessOrEqual(normalized, other)
 
 \* @type: (Seq(Seq(Int)), Int, Int) => Bool;
 IsValidPosition(b, row, col) ==
@@ -156,6 +165,9 @@ Next ==
 \* Specification
 Spec == Init /\ [][Next]_<<board, turn, gameOver, winner, moveCount, normalizedBoards>>
 
+\* A state constraint belongs in the .cfg, not in Next.
+MoveLimit == moveCount <= MAX_MOVES
+
 \* Properties to verify
 
 \* Game eventually ends
@@ -164,7 +176,7 @@ GameEventuallyEnds == <>(gameOver = TRUE)
 \* No invalid moves
 ValidMoves == 
     [](\A col \in 1..COLS : 
-        (FindLowestEmptyRow(board, col) > 0) => ENABLED MakeMove(col))
+        (~gameOver /\ FindLowestEmptyRow(board, col) > 0) => ENABLED MakeMove(col))
 
 \* Winner consistency
 WinnerConsistency == 
@@ -175,29 +187,39 @@ NoDuplicateStates ==
     \A b1, b2 \in normalizedBoards : 
         b1 = b2 \/ NormalizeBoard(b1) # NormalizeBoard(b2)
 
-\* Board reachability - every board in normalizedBoards is reachable
-BoardReachability ==
-    \A b \in normalizedBoards : 
-        \E seq \in Seq(1..COLS) : 
-            /\ Len(seq) <= ROWS * COLS
-            /\ IsValidGameSequence(seq, b)
+\* Replay a finite sequence. Row ROWS is the bottom of this board.
+RECURSIVE PlaySequence(_)
+PlaySequence(moves) ==
+    IF Len(moves) = 0 THEN
+        [row \in 1..ROWS |-> [col \in 1..COLS |-> 0]]
+    ELSE LET previous == PlaySequence(SubSeq(moves, 1, Len(moves) - 1))
+             col == moves[Len(moves)]
+             row == FindLowestEmptyRow(previous, col)
+             player == IF Len(moves) % 2 = 1 THEN 1 ELSE 2
+         IN IF row > 0 /\ GetWinner(previous) = 0
+            THEN PlacePiece(previous, row, col, player)
+            ELSE previous
 
-\* @type: (Seq(Int), Seq(Seq(Int))) => Bool;            
+\* @type: (Seq(Int), Seq(Seq(Int))) => Bool;
 IsValidGameSequence(moves, targetBoard) ==
-    LET PlaySequence[i \in 0..Len(moves)] ==
-        IF i = 0 THEN [row \in 1..ROWS |-> [col \in 1..COLS |-> 0]]
-        ELSE LET col == moves[i]
-                 row == FindLowestEmptyRow(PlaySequence[i-1], col)
-                 player == IF i % 2 = 1 THEN 1 ELSE 2
-             IN IF row > 0 THEN PlacePiece(PlaySequence[i-1], row, col, player)
-                ELSE PlaySequence[i-1]
-    IN NormalizeBoard(PlaySequence[Len(moves)]) = targetBoard
+    /\ moves \in [1..Len(moves) -> 1..COLS]
+    /\ \A i \in 1..Len(moves) :
+        LET previous == PlaySequence(SubSeq(moves, 1, i - 1))
+        IN /\ GetWinner(previous) = 0
+           /\ FindLowestEmptyRow(previous, moves[i]) > 0
+    /\ NormalizeBoard(PlaySequence(moves)) = targetBoard
 
-\* Efficiency metrics
+\* Finite enumeration for tiny boards only; expensive on a 6x7 board.
+BoardReachability ==
+    \A b \in normalizedBoards :
+        \E moves \in UNION {[1..n -> 1..COLS] : n \in 0..(ROWS * COLS)} :
+            IsValidGameSequence(moves, b)
+
+\* History-size analysis predicate; not a state-space reduction invariant.
 StateSpaceEfficiency ==
     LET totalPossibleBoards == 3^(ROWS * COLS)  \* Each cell can be 0, 1, or 2
         reachableBoards == Cardinality(normalizedBoards)
-    IN reachableBoards * 4 <= totalPossibleBoards  \* At most 25% due to normalization
+    IN reachableBoards * 4 <= totalPossibleBoards
 
 \* Invariants
 TypeInvariant ==
@@ -206,5 +228,21 @@ TypeInvariant ==
     /\ gameOver \in BOOLEAN
     /\ winner \in {0, 1, 2}
     /\ moveCount \in 0..(ROWS * COLS)
+    /\ normalizedBoards \subseteq TypeBoard
+
+PieceCountConsistency ==
+    moveCount = Cardinality({<<r, c>> \in (1..ROWS) \X (1..COLS) : board[r][c] # 0})
+
+TurnConsistency == turn = IF moveCount % 2 = 0 THEN 1 ELSE 2
+
+GravityInvariant ==
+    \A row \in 1..(ROWS - 1), col \in 1..COLS :
+        board[row][col] # 0 => board[row + 1][col] # 0
+
+TerminalConsistency ==
+    /\ winner = GetWinner(board)
+    /\ gameOver = (winner > 0 \/ IsBoardFull(board))
+
+MoveAvailability == ~gameOver => GetValidColumns(board) # {}
 
 =============================================================================

@@ -1,1 +1,6 @@
 _apalache-out
+states/
+tla2tools.jar
+*_TTrace_*.tla
+*_TTrace_*.cfg
+__pycache__/
